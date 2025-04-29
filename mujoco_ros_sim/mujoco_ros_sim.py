@@ -58,9 +58,8 @@ class MujocoSimNode(Node):
         self.declare_parameter(name='robot_name', descriptor=descriptor)
         self.declare_parameter(name='controller_class', descriptor=descriptor)
         # robot_name: string indicating the name of the robot model to load.
-
-        # controller_class_str: string identifier for the controller class to be dynamically loaded.
         robot_name = self.get_parameter('robot_name').get_parameter_value().string_value
+        # controller_class_str: string identifier for the controller class to be dynamically loaded.
         controller_class_str = self.get_parameter('controller_class').get_parameter_value().string_value
 
 
@@ -79,7 +78,7 @@ class MujocoSimNode(Node):
             jname = self.mj_model.names[name_adr:].split(b'\x00', 1)[0].decode('utf-8')
             self.joint_names.append(jname)
 
-        # Extract actuator names from the model.
+        # 4) Extract actuator names from the model.
         self.actuator_names = []
         for i in range(self.mj_model.nu):
             # name_adr: starting address for the i-th actuator name in the names array.
