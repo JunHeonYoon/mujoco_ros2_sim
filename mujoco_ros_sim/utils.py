@@ -3,6 +3,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 import time
 import importlib
+from typing import List, Tuple
 
 def load_mj_model(robot_name) -> mujoco.MjModel:
     """
@@ -60,7 +61,6 @@ def precise_sleep(duration):
         if (now - start) >= duration:
             break
 
-
 def load_class(full_class_string: str):
     """
     Dynamically loads a class from a full class path string.
@@ -87,7 +87,6 @@ def load_class(full_class_string: str):
     if not full_class_string:
         # Return None if there is no valid class string.
         return None
-
     # Ensure that the string includes a dot to separate the module and class names.
     if '.' not in full_class_string:
         # Raise an error if the format is incorrect.

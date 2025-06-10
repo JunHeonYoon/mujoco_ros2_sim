@@ -35,7 +35,6 @@ setup(
     maintainer_email='yoonjh98@snu.ac.kr',
     description='Robot simulator package with MuJoCo & ROS2',
     license='Apache License 2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             # ros2 run mujoco_ros_sim mujoco_ros_sim -> main function in mujoco_ros_sim.py
@@ -43,3 +42,7 @@ setup(
         ],
     },
 )
+
+# To use --symlink-install, setuptools version must be < 64
+# python3 -m pip uninstall -y setuptools		
+# python3 -m pip install "setuptools<64"	
