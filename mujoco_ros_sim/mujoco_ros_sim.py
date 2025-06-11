@@ -62,6 +62,10 @@ class MujocoSimNode(Node):
             self.sensor_names.append(sname)
             self.sensor_adr.append(int(self.mj_model.sensor_adr[i]))
             self.sensor_dim.append(int(self.mj_model.sensor_dim[i]))
+            
+        self.state_lock = threading.Lock()
+        self.pos_dict, self.vel_dict, self.tau_ext_dict = {}, {}, {}
+        self.sensor_dict = {}
         
         Controller = load_class(controller_class_str)
         if Controller is not None:
@@ -70,11 +74,12 @@ class MujocoSimNode(Node):
         else:
             self.controller = None
 
+        self.is_starting = True
+        
         self.thread = threading.Thread(target=lambda: rclpy.spin(self), daemon=True)
+        self.thread.start()
     
     def run(self):
-        self.is_starting = True
-        self.thread.start()
         with mujoco.viewer.launch_passive(self.mj_model, self.mj_data,
                                           show_left_ui=False, show_right_ui=False) as viewer:
             viewer.sync()
@@ -82,11 +87,10 @@ class MujocoSimNode(Node):
 
             while viewer.is_running():
                 step_start = time.perf_counter()
-                rclpy.spin_once(self, timeout_sec=0.0001)
 
                 mujoco.mj_step(self.mj_model, self.mj_data)
                 
-                self.pos_dict, self.vel_dict, self.tau_ext_dict = {}, {}, {}
+                tmp_pos, tmp_vel, tmp_tau_ext = {}, {}, {}
                 for jid, jname in zip(self.joint_dict["joint_ids"], self.joint_dict["joint_names"]):
                     idx_q = self.mj_model.jnt_qposadr[jid]
                     idx_v = self.mj_model.jnt_dofadr[jid]
@@ -96,26 +100,32 @@ class MujocoSimNode(Node):
                     nq = next_q - idx_q
                     nv = next_v - idx_v
 
-                    self.pos_dict[jname]      = np.copy(self.mj_data.qpos[idx_q : idx_q + nq])
-                    self.vel_dict[jname]      = np.copy(self.mj_data.qvel[idx_v : idx_v + nv])
-                    self.tau_ext_dict[jname]  = np.copy(self.mj_data.qfrc_applied[idx_v : idx_v + nv])
-                
-                current_sensors = {}
+                    tmp_pos[jname]      = np.copy(self.mj_data.qpos[idx_q : idx_q + nq])
+                    tmp_vel[jname]      = np.copy(self.mj_data.qvel[idx_v : idx_v + nv])
+                    tmp_tau_ext[jname]  = np.copy(self.mj_data.qfrc_applied[idx_v : idx_v + nv])
+
+                tmp_sensor = {}
                 for name, adr, dim in zip(self.sensor_names,
                                           self.sensor_adr,
                                           self.sensor_dim):
-                    current_sensors[name] = np.copy(self.mj_data.sensordata[adr: adr + dim])
-                
-                if self.controller is not None:
-                    self.controller.updateState(self.pos_dict, self.vel_dict, self.tau_ext_dict, current_sensors, self.mj_data.time)
+                    tmp_sensor[name] = np.copy(self.mj_data.sensordata[adr: adr + dim])
                     
-                    if self.is_starting:
-                        self.controller.starting()
-                        self.is_starting = False   
-                    self.controller.compute()
-                else:
-                    self.is_starting = False   
+                with self.state_lock:
+                    self.pos_dict = tmp_pos
+                    self.vel_dict = tmp_vel
+                    self.tau_ext_dict = tmp_tau_ext
+                    self.sensor_dict = tmp_sensor
+
                 if self.controller is not None:
+                    self.controller.updateState(self.pos_dict, self.vel_dict, self.tau_ext_dict, self.sensor_dict, self.mj_data.time)
+                        
+                if self.is_starting:
+                    if self.controller is not None:
+                        self.controller.starting()
+                    self.is_starting = False
+
+                if self.controller is not None:
+                    self.controller.compute()
                     ctrl_dict = self.controller.getCtrlInput()
                     
                     for given_actuator_name, given_ctrl_cmd in ctrl_dict.items():
@@ -134,19 +144,20 @@ class MujocoSimNode(Node):
                     
     def pubJointStateCallback(self):
         # Publish joint states
-        if not self.is_starting:
-            joint_state_msg = JointState()
-            joint_state_msg.header.stamp = self.get_clock().now().to_msg()
-            joint_state_msg.name = self.joint_dict["joint_names"]
+        with self.state_lock:
+            if not self.pos_dict:
+                return
             positions = []
             velocities = []
             for jname in self.joint_dict["joint_names"]:
                 positions.extend(self.pos_dict[jname].tolist())
                 velocities.extend(self.vel_dict[jname].tolist())
-            joint_state_msg.position = positions
-            joint_state_msg.velocity = velocities
-            self.joint_state_pub.publish(joint_state_msg)
-            
+        msg = JointState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.name = self.joint_dict["joint_names"]
+        msg.position = positions
+        msg.velocity = velocities
+        self.joint_state_pub.publish(msg)
 def main(args=None):
 
     rclpy.init(args=args)  # Initialize the ROS2 communications.
