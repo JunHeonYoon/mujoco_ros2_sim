@@ -3,7 +3,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 import time
 import importlib
-from typing import List, Tuple
+from rclpy.node import Node
 
 def load_mj_model(robot_name) -> mujoco.MjModel:
     """
@@ -105,3 +105,141 @@ def load_class(full_class_string: str):
     
     # Return the loaded class.
     return cls
+
+def print_table(node: Node, m: mujoco.MjModel):
+    # ---------- Helper: build enum-value → name dict for joint types ----------
+    jt_enum = mujoco.mjtJoint                 # enum container for joints
+    enum2name = {}                            # maps int value → readable str
+    for attr in dir(jt_enum):                 # iterate every attribute
+        if attr.startswith("mjJNT_"):         # only keep joint type constants
+            enum2name[getattr(jt_enum, attr)] = attr[5:].title()  # mjJNT_FREE -> Free
+
+    # ---------- Joint table header ----------
+    hdr = " id | name                 | type   | nq | nv | idx_q | idx_v"
+    sep = "----+----------------------+--------+----+----+-------+------"
+    node.get_logger().info(hdr)
+    node.get_logger().info(sep)
+
+    # ---------- Iterate over joints and print per-row ----------
+    for jid in range(m.njnt):
+        adr  = m.name_jntadr[jid]                         # byte offset in names buffer
+        name = m.names[adr:].split(b'\x00', 1)[0].decode()  # null-terminated C-string
+        
+        if not name:  # if name is empty, use a placeholder
+            continue
+
+        jtype     = int(m.jnt_type[jid])                  # numeric enum value
+        type_str  = enum2name.get(jtype, "Unk")           # human-readable
+
+        idx_q = int(m.jnt_qposadr[jid])                   # first qpos index
+        idx_v = int(m.jnt_dofadr[jid])                    # first qvel (dof) index
+
+        next_q = m.jnt_qposadr[jid + 1] if jid + 1 < m.njnt else m.nq
+        next_v = m.jnt_dofadr[jid + 1] if jid + 1 < m.njnt else m.nv
+
+        nq = int(next_q - idx_q)                          # number of qpos entries
+        nv = int(next_v - idx_v)                          # number of dof entries
+
+        # Print one formatted line
+        node.get_logger().info(
+            f"{jid:3d} | {name:20s} | {type_str:6s} |"
+            f" {nq:2d} | {nv:2d} | {idx_q:5d} | {idx_v:4d}"
+        )
+
+    # ---------- Actuator table (print after a blank line) ----------
+    node.get_logger().info("")                            # readability spacer
+
+    # Build enum-value → name dict for actuator transmission types
+    trn_enum = mujoco.mjtTrn
+    trn2name = {}
+    for attr in dir(trn_enum):
+        if attr.startswith("mjTRN_"):
+            trn2name[getattr(trn_enum, attr)] = attr[5:].title()  # mjTRN_JOINT -> Joint
+
+    # Pre-compute joint ID → name for quick lookup when actuator targets a joint
+    joint_names = {
+        jid: m.names[m.name_jntadr[jid]:].split(b'\x00', 1)[0].decode()
+        for jid in range(m.njnt)
+    }
+
+    # Actuator table header
+    ahdr = " id | name                 | trn     | target_joint"
+    asep = "----+----------------------+---------+-------------"
+    node.get_logger().info(ahdr)
+    node.get_logger().info(asep)
+
+    # Iterate over all actuators
+    for aid in range(m.nu):                                # m.nu == number of actuators
+        adr  = m.name_actuatoradr[aid]                     # byte offset to actuator name
+        name = m.names[adr:].split(b'\x00', 1)[0].decode()
+
+        trn_type   = int(m.actuator_trntype[aid])          # transmission type enum
+        trn_str    = trn2name.get(trn_type, "Unk")         # readable transmission
+
+        # Each actuator has up to two target IDs in actuator_trnid.
+        # For JOINT / JOINTINPARENT the first entry is the joint index.
+        target_joint = "-"
+        if trn_type in (trn_enum.mjTRN_JOINT,
+                        trn_enum.mjTRN_JOINTINPARENT):
+            j_id = int(m.actuator_trnid[aid, 0])
+            target_joint = joint_names.get(j_id, str(j_id))
+
+        # Log actuator info
+        node.get_logger().info(
+            f"{aid:3d} | {name:20s} | {trn_str:7s} | {target_joint}"
+        )
+        
+    # ---------- Sensor table (print after a blank line) ----------
+    node.get_logger().info("")
+
+    # enum → 문자열 매핑 --------------------
+    sens_enum = mujoco.mjtSensor
+    sens2name = {getattr(sens_enum, a): a[7:].title()
+                for a in dir(sens_enum) if a.startswith("mjSENS_")}
+
+    obj_enum  = mujoco.mjtObj
+    obj2name  = {getattr(obj_enum, a): a[6:].title()
+                for a in dir(obj_enum) if a.startswith("mjOBJ_")}
+
+    # 미리 body / site / joint 등의 id→name 사전 생성
+    body_names = {bid: m.names[m.name_bodyadr[bid]:].split(b'\0', 1)[0].decode()
+                for bid in range(m.nbody)}
+    site_names = {sid: m.names[m.name_siteadr[sid]:].split(b'\0', 1)[0].decode()
+                for sid in range(m.nsite)}
+    # joint_names는 위에서 이미 생성됨
+
+    def obj_name(objtype, objid):
+        """주요 object 타입별 id→name 변환(없으면 raw id 반환)"""
+        if objtype == obj_enum.mjOBJ_BODY:
+            return body_names.get(objid, str(objid))
+        if objtype == obj_enum.mjOBJ_SITE:
+            return site_names.get(objid, str(objid))
+        if objtype == obj_enum.mjOBJ_JOINT:
+            return joint_names.get(objid, str(objid))
+        return str(objid)
+
+    # Print sensor table header
+    shdr = " id | name                        | type             | dim | adr | target (obj)"
+    ssep = "----+-----------------------------+------------------+-----+-----+----------------"
+    node.get_logger().info(shdr)
+    node.get_logger().info(ssep)
+
+    # Sensor Loop
+    for sid in range(m.nsensor):
+        adr  = m.name_sensoradr[sid]
+        name = m.names[adr:].split(b'\0', 1)[0].decode()
+
+        stype = int(m.sensor_type[sid])
+        tstr  = sens2name.get(stype, "Unk")
+
+        dim   = int(m.sensor_dim[sid])
+        sadr  = int(m.sensor_adr[sid])
+
+        objtype = int(m.sensor_objtype[sid])
+        objid   = int(m.sensor_objid[sid])
+        target  = f"{obj2name.get(objtype,'-')}:{obj_name(objtype,objid)}" \
+                if objid >= 0 else "-"
+
+        node.get_logger().info(
+            f"{sid:3d} | {name:27s} | {tstr:16s} | {dim:3d} | {sadr:3d} | {target}"
+        )
