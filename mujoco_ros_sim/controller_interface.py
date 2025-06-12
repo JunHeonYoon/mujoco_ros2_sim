@@ -17,7 +17,7 @@ class ControllerInterface:
                     pos_dict: dict, 
                     vel_dict: dict, 
                     tau_ext_dict: dict,
-                    current_sensors: dict, 
+                    sensor_dict: dict, 
                     current_time: float) -> None:
         raise NotImplementedError("updateState() must be overridden.")
 
