@@ -1,17 +1,27 @@
-<?xml version="1.0"?>
-<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>mujoco_ros_sim</name>
-  <version>0.0.0</version>
-  <description>Mujoco robot simuator</description>
-  <maintainer email="yoonjh98@snu.ac.kr">Yoon Junheon</maintainer>
-  <license>TODO: License declaration</license>
+  <version>0.2.0</version>
+  <description>MuJoCo + ROS 2 hybrid simulator with C++ and Python controllers.</description>
 
-  <depend>rclpy</depend>
-  <depend>mujoco_py</depend>
+  <maintainer email="yoonjh98@snu.ac.kr">Junheon Yoon</maintainer>
+  <license>Apache 2.0</license>
 
+  <!-- build tools -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <!-- core dependencies -->
+  <depend>boost</depend>          <!-- Boost.Python -->
+  <depend>eigenpy</depend>
+  <depend>rclcpp</depend>
+
+  <!-- runtime (Python) -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
 
   <export>
-    <build_type>ament_python</build_type>
+    <!-- <build_type>ament_python</build_type> -->
+    <build_type>ament_cmake</build_type>
+    <!-- <build_type>ament_cmake_python</build_type> -->
   </export>
 </package>

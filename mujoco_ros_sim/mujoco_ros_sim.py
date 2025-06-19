@@ -1,6 +1,8 @@
+#!/usr/bin/env python3
 import time
 import numpy as np
 import threading
+import inspect
 
 import rclpy
 from rclpy.node import Node
@@ -10,14 +12,12 @@ from sensor_msgs.msg import JointState
 import mujoco
 import mujoco.viewer
 
-from .utils import load_mj_model, precise_sleep, load_class, print_table
+from mujoco_ros_sim.utils import load_mj_model, precise_sleep, load_class, print_table
 
 
 class MujocoSimNode(Node):
     def __init__(self):
-
         super().__init__('mujoco_sim_node')
-
         descriptor = ParameterDescriptor(dynamic_typing=True)
         self.declare_parameter(name='robot_name', descriptor=descriptor)
         self.declare_parameter(name='controller_class', descriptor=descriptor)
@@ -36,20 +36,22 @@ class MujocoSimNode(Node):
         
         self.joint_dict = {}
         self.joint_dict["joint_names"] = []
-        self.joint_dict["joint_ids"] = []
+        self.joint_dict["jname_to_jid"] = {}
         for i in range(self.mj_model.njnt):
             name_adr = self.mj_model.name_jntadr[i]
             jname = self.mj_model.names[name_adr:].split(b'\x00', 1)[0].decode('utf-8')
             if not jname:
                 continue
             self.joint_dict["joint_names"].append(jname)
-            self.joint_dict["joint_ids"].append(i)
+            self.joint_dict["jname_to_jid"][jname] = i
             
         self.joint_dict["actuator_names"] = []
+        self.joint_dict["aname_to_aid"] = {}
         for i in range(self.mj_model.nu):
             name_adr = self.mj_model.name_actuatoradr[i]
             aname = self.mj_model.names[name_adr:].split(b'\x00', 1)[0].decode('utf-8')
             self.joint_dict["actuator_names"].append(aname)
+            self.joint_dict["aname_to_aid"][aname] = i
                             
         self.sensor_names: list[str] = []
         self.sensor_adr:   list[int] = []
@@ -69,7 +71,19 @@ class MujocoSimNode(Node):
         
         Controller = load_class(controller_class_str)
         if Controller is not None:
-            self.controller = Controller(self, self.dt, self.joint_dict)
+            # try:
+            #     # (a) Python-style: node, dt, dict
+            #     self.controller = Controller(self, self.dt, self.joint_dict)
+            # except TypeError:
+            #     # (b) C++-style:      dt,   dict
+            # self.controller = Controller(self.dt, self.joint_dict)
+            # if Controller is not None:
+            if inspect.isclass(Controller):
+                # ── Python controller ─────────────────────────────
+                self.controller = Controller(self, self.dt, self.joint_dict)
+            else:
+                # ── C++ Boost.Python factory ────────────────────
+                self.controller = Controller(self.dt, self.joint_dict)
             self.get_logger().info(f"Sim node with controller={controller_class_str}")
         else:
             self.controller = None
@@ -91,18 +105,22 @@ class MujocoSimNode(Node):
                 mujoco.mj_step(self.mj_model, self.mj_data)
                 
                 tmp_pos, tmp_vel, tmp_tau_ext = {}, {}, {}
-                for jid, jname in zip(self.joint_dict["joint_ids"], self.joint_dict["joint_names"]):
+                for jname in self.joint_dict["joint_names"]:
+                    jid   = self.joint_dict["jname_to_jid"][jname]
                     idx_q = self.mj_model.jnt_qposadr[jid]
                     idx_v = self.mj_model.jnt_dofadr[jid]
 
-                    next_q = self.mj_model.jnt_qposadr[jid + 1] if jid + 1 < self.mj_model.njnt else self.mj_model.nq
-                    next_v = self.mj_model.jnt_dofadr[jid + 1] if jid + 1 < self.mj_model.njnt else self.mj_model.nv
+                    next_q = (self.mj_model.jnt_qposadr[jid + 1]
+                            if jid + 1 < self.mj_model.njnt else self.mj_model.nq)
+                    next_v = (self.mj_model.jnt_dofadr[jid + 1]
+                            if jid + 1 < self.mj_model.njnt else self.mj_model.nv)
+
                     nq = next_q - idx_q
                     nv = next_v - idx_v
 
-                    tmp_pos[jname]      = np.copy(self.mj_data.qpos[idx_q : idx_q + nq])
-                    tmp_vel[jname]      = np.copy(self.mj_data.qvel[idx_v : idx_v + nv])
-                    tmp_tau_ext[jname]  = np.copy(self.mj_data.qfrc_applied[idx_v : idx_v + nv])
+                    tmp_pos[jname]     = np.copy(self.mj_data.qpos[idx_q : idx_q + nq])
+                    tmp_vel[jname]     = np.copy(self.mj_data.qvel[idx_v : idx_v + nv])
+                    tmp_tau_ext[jname] = np.copy(self.mj_data.qfrc_applied[idx_v : idx_v + nv])
 
                 tmp_sensor = {}
                 for name, adr, dim in zip(self.sensor_names,
@@ -159,7 +177,6 @@ class MujocoSimNode(Node):
         msg.velocity = velocities
         self.joint_state_pub.publish(msg)
 def main(args=None):
-
     rclpy.init(args=args)  # Initialize the ROS2 communications.
     node = MujocoSimNode()  # Create an instance of the simulation node.
     try:
@@ -170,3 +187,6 @@ def main(args=None):
     finally:
         node.destroy_node()  # Clean up the node.
         rclpy.shutdown()  # Shutdown the ROS2 communications.
+        
+if __name__ == "__main__":
+    main()
