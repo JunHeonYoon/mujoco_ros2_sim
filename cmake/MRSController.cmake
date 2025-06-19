@@ -1,5 +1,5 @@
 function(mrs_add_controller TARGET)
-  if(ARGN STREQUAL "")   # 소스 존재 확인
+  if(ARGN STREQUAL "")
     message(FATAL_ERROR "mrs_add_controller(${TARGET}) needs at least one source file")
   endif()
 
@@ -21,5 +21,5 @@ function(mrs_add_controller TARGET)
            $<INSTALL_INTERFACE:include>)
 
   install(TARGETS ${TARGET}
-    LIBRARY DESTINATION lib/mujoco_ros_sim_plugins)
+    LIBRARY DESTINATION lib/${PROJECT_NAME}_plugins)
 endfunction()

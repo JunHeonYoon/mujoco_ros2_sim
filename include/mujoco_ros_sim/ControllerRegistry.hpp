@@ -14,7 +14,7 @@ using ControllerFactory =
 class ControllerRegistry
 {
 public:
-  static ControllerRegistry& instance();          // ← 선언만
+  static ControllerRegistry& instance();
   void add(const std::string& name, ControllerFactory f)
   { map_[name] = std::move(f); }
   const auto& map() const { return map_; }
@@ -32,18 +32,18 @@ inline void ensure_rclcpp()
   }
 }
 
-/* ───────── registration 매크로 ───────── */
-#define REGISTER_MJ_CONTROLLER(CLS, NAME)                                 \
-  namespace {                                                             \
-    std::unique_ptr<ControllerInterface>                                  \
-    factory_##CLS(double dt, JointDict jd)                                \
-    {                                                                     \
-      ensure_rclcpp();                                                    \
-      auto node = rclcpp::Node::make_shared(std::string(NAME));           \
-      return std::make_unique<CLS>(node, dt, std::move(jd));              \
-    }                                                                     \
-    const bool registered_##CLS = [](){                                   \
-      ControllerRegistry::instance().add(NAME, factory_##CLS);            \
-      return true;                                                        \
-    }();                                                                  \
+
+#define REGISTER_MJ_CONTROLLER(CLS, NAME)                                       \
+  namespace                                                                     \
+  {                                                                             \
+    std::unique_ptr<ControllerInterface> factory_##CLS(double dt, JointDict jd) \
+    {                                                                           \
+      ensure_rclcpp();                                                          \
+      auto node = rclcpp::Node::make_shared(std::string(NAME));                 \
+      return std::make_unique<CLS>(node, dt, std::move(jd));                    \
+    }                                                                           \
+    const bool registered_##CLS = [](){                                         \
+      ControllerRegistry::instance().add(NAME, factory_##CLS);                  \
+      return true;                                                              \
+    }();                                                                        \
   }

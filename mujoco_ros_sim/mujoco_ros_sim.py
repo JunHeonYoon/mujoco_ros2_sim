@@ -71,13 +71,6 @@ class MujocoSimNode(Node):
         
         Controller = load_class(controller_class_str)
         if Controller is not None:
-            # try:
-            #     # (a) Python-style: node, dt, dict
-            #     self.controller = Controller(self, self.dt, self.joint_dict)
-            # except TypeError:
-            #     # (b) C++-style:      dt,   dict
-            # self.controller = Controller(self.dt, self.joint_dict)
-            # if Controller is not None:
             if inspect.isclass(Controller):
                 # ── Python controller ─────────────────────────────
                 self.controller = Controller(self, self.dt, self.joint_dict)
