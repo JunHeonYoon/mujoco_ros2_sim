@@ -40,7 +40,6 @@ def _refresh() -> None:
         for short in names:
             func_name = f"{short}_cpp"
             func_name = short
-            print(func_name)
             func = getattr(_cpp_bindings, func_name, None)
             if func and not hasattr(pkg_mod, func_name):
                 setattr(pkg_mod, func_name, func)

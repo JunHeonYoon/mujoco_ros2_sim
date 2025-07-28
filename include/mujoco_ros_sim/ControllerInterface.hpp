@@ -6,6 +6,7 @@
 #include <vector>
 #include <Eigen/Dense>
 #include "mujoco_ros_sim/JointDict.hpp"
+#include "mujoco_ros_sim/ControllerRegistry.hpp"
 
 using Vec          = Eigen::VectorXd;
 using VecMap       = std::unordered_map<std::string, Vec>;

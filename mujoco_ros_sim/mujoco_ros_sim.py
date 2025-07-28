@@ -72,10 +72,10 @@ class MujocoSimNode(Node):
         Controller = load_class(controller_class_str)
         if Controller is not None:
             if inspect.isclass(Controller):
-                # ── Python controller ─────────────────────────────
+                # Python controller
                 self.controller = Controller(self, self.dt, self.joint_dict)
             else:
-                # ── C++ Boost.Python factory ────────────────────
+                # C++ Boost.Python factory 
                 self.controller = Controller(self.dt, self.joint_dict)
             self.get_logger().info(f"Sim node with controller={controller_class_str}")
         else:
@@ -111,30 +111,27 @@ class MujocoSimNode(Node):
                     nq = next_q - idx_q
                     nv = next_v - idx_v
 
-                    tmp_pos[jname]     = np.copy(self.mj_data.qpos[idx_q : idx_q + nq])
-                    tmp_vel[jname]     = np.copy(self.mj_data.qvel[idx_v : idx_v + nv])
-                    tmp_tau_ext[jname] = np.copy(self.mj_data.qfrc_applied[idx_v : idx_v + nv])
+                    tmp_pos[jname]     = self.mj_data.qpos[idx_q : idx_q + nq]
+                    tmp_vel[jname]     = self.mj_data.qvel[idx_v : idx_v + nv]
+                    tmp_tau_ext[jname] = self.mj_data.qfrc_applied[idx_v : idx_v + nv]
 
                 tmp_sensor = {}
                 for name, adr, dim in zip(self.sensor_names,
                                           self.sensor_adr,
                                           self.sensor_dim):
-                    tmp_sensor[name] = np.copy(self.mj_data.sensordata[adr: adr + dim])
+                    tmp_sensor[name] = self.mj_data.sensordata[adr: adr + dim]
                     
                 with self.state_lock:
                     self.pos_dict = tmp_pos
                     self.vel_dict = tmp_vel
                     self.tau_ext_dict = tmp_tau_ext
                     self.sensor_dict = tmp_sensor
-
                 if self.controller is not None:
                     self.controller.updateState(self.pos_dict, self.vel_dict, self.tau_ext_dict, self.sensor_dict, self.mj_data.time)
-                        
                 if self.is_starting:
                     if self.controller is not None:
                         self.controller.starting()
                     self.is_starting = False
-
                 if self.controller is not None:
                     self.controller.compute()
                     ctrl_dict = self.controller.getCtrlInput()
@@ -143,7 +140,6 @@ class MujocoSimNode(Node):
                         if given_actuator_name in self.joint_dict["actuator_names"]:
                             actuator_id = self.joint_dict["actuator_names"].index(given_actuator_name)
                             self.mj_data.ctrl[actuator_id] = given_ctrl_cmd
-                            
                 sim_time = self.mj_data.time
                 if (sim_time - last_view_time) >= 1.0 / self.viewer_fps:
                     viewer.sync()
