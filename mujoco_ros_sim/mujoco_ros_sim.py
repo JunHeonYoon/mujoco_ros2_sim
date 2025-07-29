@@ -33,6 +33,9 @@ class MujocoSimNode(Node):
         self.mj_data = mujoco.MjData(self.mj_model)
         self.dt = self.mj_model.opt.timestep
         self.viewer_fps = 60.0
+
+        self.cam_fps        = 15.0
+        self._cam_rendered     = {}
         
         self.joint_dict = {}
         self.joint_dict["joint_names"] = []
@@ -68,6 +71,35 @@ class MujocoSimNode(Node):
         self.state_lock = threading.Lock()
         self.pos_dict, self.vel_dict, self.tau_ext_dict = {}, {}, {}
         self.sensor_dict = {}
+
+        # ────────────────────────────────INIT_CAM──────────────────────────────────────────
+        cam_names, cam_ids, cam_res = [], {}, {}
+        for cam_id in range(self.mj_model.ncam):
+            cname = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_CAMERA, cam_id)
+            if cname in ("", "free"):                         # skip the free cam
+                continue
+            w, h = self.mj_model.cam_resolution[cam_id]
+            cam_names.append(cname)
+            cam_ids[cname] = cam_id
+            cam_res[cname] = (w, h)
+
+        # allocate ONE renderer big enough for the largest requested resolution
+        if cam_names:
+            max_w = max(w for w, _ in cam_res.values())
+            max_h = max(h for _, h in cam_res.values())
+            self.mj_model.vis.global_.offwidth  = max(max_w,  self.mj_model.vis.global_.offwidth)
+            self.mj_model.vis.global_.offheight = max(max_h,  self.mj_model.vis.global_.offheight)
+            self.cam_renderer = mujoco.Renderer(self.mj_model, width=max_w, height=max_h)
+        else:
+            self.cam_renderer = None
+
+        self.camera_dict = {
+            "names": cam_names,
+            "id":    cam_ids,
+            "res":   cam_res
+        }
+        # ────────────────────────────────────────────────────────────────────────────────────────
+
         
         Controller = load_class(controller_class_str)
         if Controller is not None:
@@ -85,17 +117,31 @@ class MujocoSimNode(Node):
         
         self.thread = threading.Thread(target=lambda: rclpy.spin(self), daemon=True)
         self.thread.start()
+
+    def _render_rgb(self, cam_name: str) -> np.ndarray:
+        """Render *cam_name* and return uint8 RGB (H,W,3) at its native size."""
+        cid      = self.camera_dict["id"][cam_name]
+        w, h     = self.camera_dict["res"][cam_name]
+
+        self.cam_renderer.disable_depth_rendering()
+        self.cam_renderer.update_scene(self.mj_data, camera=cid)
+        full_img = self.cam_renderer.render()             # (max_h, max_w, 3)
+
+        return full_img[:h, :w, :]                        # crop & return
     
     def run(self):
         with mujoco.viewer.launch_passive(self.mj_model, self.mj_data,
                                           show_left_ui=False, show_right_ui=False) as viewer:
             viewer.sync()
             last_view_time = 0.0
+            _last_cam_time = 0.0
 
             while viewer.is_running():
                 step_start = time.perf_counter()
 
                 mujoco.mj_step(self.mj_model, self.mj_data)
+
+                sim_time = self.mj_data.time
                 
                 tmp_pos, tmp_vel, tmp_tau_ext = {}, {}, {}
                 for jname in self.joint_dict["joint_names"]:
@@ -120,6 +166,16 @@ class MujocoSimNode(Node):
                                           self.sensor_adr,
                                           self.sensor_dim):
                     tmp_sensor[name] = self.mj_data.sensordata[adr: adr + dim]
+
+                # ────────────────────────────────────────────────────────────────────────────────────────
+                if self.cam_renderer is not None and sim_time - _last_cam_time >= 1.0/self.cam_fps:
+                    for cname in self.camera_dict["names"]:
+                        self._cam_rendered[cname] = self._render_rgb(cname)
+                    _last_cam_time = sim_time
+
+                for cname, img in self._cam_rendered.items():
+                    tmp_sensor[cname] = img
+                # ────────────────────────────────────────────────────────────────────────────────────────
                     
                 with self.state_lock:
                     self.pos_dict = tmp_pos
@@ -140,7 +196,7 @@ class MujocoSimNode(Node):
                         if given_actuator_name in self.joint_dict["actuator_names"]:
                             actuator_id = self.joint_dict["actuator_names"].index(given_actuator_name)
                             self.mj_data.ctrl[actuator_id] = given_ctrl_cmd
-                sim_time = self.mj_data.time
+                
                 if (sim_time - last_view_time) >= 1.0 / self.viewer_fps:
                     viewer.sync()
                     last_view_time = sim_time
